@@ -6,23 +6,25 @@ import 'package:test/test.dart';
 import 'helpers/logging.dart';
 import 'helpers/proxy.dart';
 
-Set<int> usedPorts = {};
+// main() is async so we can await the availability check before any group or
+// test is registered. Passing skip: to group() is the only reliable way to
+// prevent test *bodies* from running — markTestSkipped() in setUp() marks the
+// test but does not stop execution, causing timeouts and false failures.
+Future<void> main() async {
+  maybeActivateAllLogLevels();
 
-void main() {
+  final availability = await checkToxiproxyAvailability();
+  final skipReason = availability.isAvailable
+      ? null
+      : 'Toxiproxy unavailable on localhost:8474 '
+          '(${availability.reason}) — '
+          'start Toxiproxy and the Phoenix backend to run these tests.';
+
   group('PhoenixChannel', () {
     const addr = 'ws://localhost:4004/socket/websocket';
 
-    setUpAll(() {
-      maybeActivateAllLogLevels();
-    });
-
-    setUp(() async {
-      await prepareProxy();
-    });
-
-    tearDown(() async {
-      await destroyProxy();
-    });
+    setUp(() => prepareProxy());
+    tearDown(() => destroyProxy());
 
     test('can join a channel through a socket', () async {
       final socket = PhoenixSocket(addr);
@@ -35,9 +37,11 @@ void main() {
       });
 
       await completer.future;
+      socket.dispose();
     });
 
-    test('can join a channel through a socket that starts closed then connects',
+    test(
+        'can join a channel through a socket that starts closed then connects',
         () async {
       await haltThenResumeProxy();
 
@@ -45,18 +49,18 @@ void main() {
       final completer = Completer<void>();
 
       await socket.connect();
-
       socket.addChannel(topic: 'channel1').join().onReply('ok', (reply) {
         expect(reply.status, equals('ok'));
         completer.complete();
       });
 
       await completer.future;
+      socket.dispose();
     });
 
     test(
-        'can join a channel through a socket that disconnects before join but reconnects',
-        () async {
+        'can join a channel through a socket that disconnects before join '
+        'but reconnects', () async {
       final socket = PhoenixSocket(addr);
       final completer = Completer<void>();
 
@@ -64,8 +68,8 @@ void main() {
 
       await haltProxy();
       final joinFuture = socket.addChannel(topic: 'channel1').join();
-      Future.delayed(const Duration(milliseconds: 300))
-          .then((value) => resumeProxy());
+      Future<void>.delayed(const Duration(milliseconds: 300))
+          .then((_) => resumeProxy());
 
       joinFuture.onReply('ok', (reply) {
         expect(reply.status, equals('ok'));
@@ -73,18 +77,17 @@ void main() {
       });
 
       await completer.future;
+      socket.dispose();
     });
 
     test(
-        'can join a channel through a socket that gets a "peer reset" before join but reconnects',
-        () async {
+        'can join a channel through a socket that gets a "peer reset" '
+        'before join but reconnects', () async {
       final socket = PhoenixSocket(addr);
       final completer = Completer<void>();
 
       await socket.connect();
-      addTearDown(() {
-        socket.close();
-      });
+      addTearDown(socket.close);
       await resetPeer();
 
       runZonedGuarded(() {
@@ -95,8 +98,8 @@ void main() {
         });
       }, (error, stack) {});
 
-      Future.delayed(const Duration(milliseconds: 1000))
-          .then((value) => resetPeer(enable: false));
+      Future<void>.delayed(const Duration(milliseconds: 1000))
+          .then((_) => resetPeer(enable: false));
 
       await completer.future;
     });
@@ -112,6 +115,7 @@ void main() {
       });
 
       await completer.future;
+      socket.dispose();
     });
 
     test('can join a channel requiring parameters', () async {
@@ -120,20 +124,24 @@ void main() {
       await socket.connect();
 
       final channel1 = socket.addChannel(
-          topic: 'channel1:hello', parameters: {'password': 'deadbeef'});
+        topic: 'channel1:hello',
+        parameters: {'password': 'deadbeef'},
+      );
 
-      expect(channel1.join().future, completes);
+      await expectLater(channel1.join().future, completes);
+      socket.dispose();
     });
 
     test('can handle channel join failures', () async {
       final socket = PhoenixSocket(addr);
-
       final completer = Completer<void>();
 
       await socket.connect();
 
       final channel1 = socket.addChannel(
-          topic: 'channel1:hello', parameters: {'password': 'deadbee?'});
+        topic: 'channel1:hello',
+        parameters: {'password': 'deadbee?'},
+      );
 
       channel1.join().onReply('error', (error) {
         expect(error.status, equals('error'));
@@ -141,6 +149,7 @@ void main() {
       });
 
       await completer.future;
+      socket.dispose();
     });
 
     test('can handle channel crash on join', () async {
@@ -149,8 +158,10 @@ void main() {
 
       await socket.connect();
 
-      final channel1 = socket
-          .addChannel(topic: 'channel1:hello', parameters: {'crash!': '11'});
+      final channel1 = socket.addChannel(
+        topic: 'channel1:hello',
+        parameters: {'crash!': '11'},
+      );
 
       channel1.join().onReply('error', (error) {
         expect(error.status, equals('error'));
@@ -159,6 +170,7 @@ void main() {
       });
 
       await completer.future;
+      socket.dispose();
     });
 
     test('can send messages to channels and receive a reply', () async {
@@ -172,6 +184,7 @@ void main() {
       final reply = await channel1.push('hello!', {'foo': 'bar'}).future;
       expect(reply.status, equals('ok'));
       expect(reply.response, equals({'name': 'bar'}));
+      socket.dispose();
     });
 
     test(
@@ -190,6 +203,7 @@ void main() {
       final reply = await channel1.push('hello!', {'foo': 'bar'}).future;
       expect(reply.status, equals('ok'));
       expect(reply.response, equals({'name': 'bar'}));
+      socket.dispose();
     });
 
     test(
@@ -204,11 +218,10 @@ void main() {
 
       await resetPeerThenResumeProxy();
 
-      final push = channel1.push('hello!', {'foo': 'bar'});
-      final reply = await push.future;
-
+      final reply = await channel1.push('hello!', {'foo': 'bar'}).future;
       expect(reply.status, equals('ok'));
       expect(reply.response, equals({'name': 'bar'}));
+      socket.dispose();
     });
 
     test(
@@ -223,20 +236,19 @@ void main() {
 
       await resetPeer();
 
-      final Completer<Object> errorCompleter = Completer();
-
+      final errorCompleter = Completer<Object>();
       runZonedGuarded(() async {
-        final push = channel1.push('hello!', {'foo': 'bar'});
         try {
-          await push.future;
+          await channel1.push('hello!', {'foo': 'bar'}).future;
         } catch (err) {
           errorCompleter.complete(err);
         }
       }, (error, stack) {});
 
-      final Object exception;
-      expect(exception = await errorCompleter.future, isA<PhoenixException>());
+      final exception = await errorCompleter.future;
+      expect(exception, isA<PhoenixException>());
       expect((exception as PhoenixException).socketClosed, isNotNull);
+      socket.dispose();
     });
 
     test(
@@ -252,21 +264,19 @@ void main() {
 
         await haltProxy();
 
-        final Completer<Object> errorCompleter = Completer();
+        final errorCompleter = Completer<Object>();
         runZonedGuarded(() async {
           try {
-            final push = channel1.push('hello!', {'foo': 'bar'});
-            await push.future;
+            await channel1.push('hello!', {'foo': 'bar'}).future;
           } catch (err) {
             errorCompleter.complete(err);
           }
         }, (error, stack) {});
 
         expect(await errorCompleter.future, isA<ChannelClosedError>());
+        socket.dispose();
       },
-      timeout: Timeout(
-        Duration(seconds: 5),
-      ),
+      timeout: const Timeout(Duration(seconds: 5)),
     );
 
     test('only emits reply messages that are channel replies', () async {
@@ -275,13 +285,14 @@ void main() {
       socket.connect();
 
       final channel1 = socket.addChannel(topic: 'channel1');
-      final channelMessages = [];
-      channel1.messages.forEach((element) => channelMessages.add(element));
+      final channelMessages = <dynamic>[];
+      channel1.messages.forEach(channelMessages.add);
 
       await channel1.join().future;
       await channel1.push('hello!', {'foo': 'bar'}).future;
 
       expect(channelMessages, hasLength(2));
+      socket.dispose();
     });
 
     test('can receive messages from channels', () async {
@@ -298,6 +309,7 @@ void main() {
         expect(msg.payload, equals({}));
         if (++count == 5) break;
       }
+      socket.dispose();
     });
 
     test('can send and receive messages from multiple channels', () async {
@@ -312,50 +324,31 @@ void main() {
       await channel2.join().future;
 
       addTearDown(() {
-        socket1.close();
-        socket2.close();
+        socket1.dispose();
+        socket2.dispose();
       });
 
       expect(
         channel1.messages,
         emitsInOrder([
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket1',
-            'was from socket1',
-          ),
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket2',
-            'was from socket2',
-          ),
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket2',
-            'was from socket2',
-          ),
+          predicate((dynamic m) => m.payload['from'] == 'socket1', 'from socket1'),
+          predicate((dynamic m) => m.payload['from'] == 'socket2', 'from socket2'),
+          predicate((dynamic m) => m.payload['from'] == 'socket2', 'from socket2'),
         ]),
       );
-
       expect(
         channel2.messages,
         emitsInOrder([
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket1',
-            'was from socket1',
-          ),
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket2',
-            'was from socket2',
-          ),
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket2',
-            'was from socket2',
-          ),
+          predicate((dynamic m) => m.payload['from'] == 'socket1', 'from socket1'),
+          predicate((dynamic m) => m.payload['from'] == 'socket2', 'from socket2'),
+          predicate((dynamic m) => m.payload['from'] == 'socket2', 'from socket2'),
         ]),
       );
 
       channel1.push('ping', {'from': 'socket1'});
-      await Future.delayed(Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
       channel2.push('ping', {'from': 'socket2'});
-      await Future.delayed(Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
       channel2.push('ping', {'from': 'socket2'});
     });
 
@@ -371,24 +364,18 @@ void main() {
       await channel2.join().future;
 
       addTearDown(() {
-        socket1.close();
-        socket2.close();
+        socket1.dispose();
+        socket2.dispose();
       });
 
       channel1.push('ping', {'from': 'socket1'});
-
       expect(
         channel2.messages,
-        emits(
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket1',
-            'was from socket1',
-          ),
-        ),
+        emits(predicate((dynamic m) => m.payload['from'] == 'socket1',
+            'from socket1')),
       );
 
       await channel1.leave().future;
-
       expect(channel1.state, equals(PhoenixChannelState.closed));
       expect(socket1.channels.length, equals(0));
     });
@@ -405,24 +392,18 @@ void main() {
       await channel2.join().future;
 
       addTearDown(() {
-        socket1.close();
-        socket2.close();
+        socket1.dispose();
+        socket2.dispose();
       });
 
       channel1.push('ping', {'from': 'socket1'});
-
       expect(
         channel2.messages,
-        emits(
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket1',
-            'was from socket1',
-          ),
-        ),
+        emits(predicate((dynamic m) => m.payload['from'] == 'socket1',
+            'from socket1')),
       );
 
       await channel1.leave().future;
-
       expect(channel1.state, equals(PhoenixChannelState.closed));
       expect(socket1.channels.length, equals(0));
 
@@ -430,19 +411,14 @@ void main() {
       await channel3.join().future;
 
       channel3.push('ping', {'from': 'socket1'});
-
       expect(
         channel2.messages,
-        emits(
-          predicate(
-            (dynamic msg) => msg.payload['from'] == 'socket1',
-            'was from socket1',
-          ),
-        ),
+        emits(predicate((dynamic m) => m.payload['from'] == 'socket1',
+            'from socket1')),
       );
     });
 
-    test('Pushing message on a closed channel throws exception', () async {
+    test('pushing message on a closed channel throws exception', () async {
       final socket = PhoenixSocket(addr);
       await socket.connect();
       final channel = socket.addChannel(topic: 'channel3');
@@ -454,6 +430,7 @@ void main() {
         () => channel.push('EventName', {}),
         throwsA(isA<ChannelClosedError>()),
       );
+      socket.dispose();
     });
 
     test('timeout on send message will throw', () async {
@@ -463,11 +440,8 @@ void main() {
       await channel.join().future;
 
       final push = channel.push('hello!', {'foo': 'bar'}, Duration.zero);
-
-      expect(
-        push.future,
-        throwsA(isA<ChannelTimeoutException>()),
-      );
+      expect(push.future, throwsA(isA<ChannelTimeoutException>()));
+      socket.dispose();
     });
-  });
+  }, skip: skipReason); // ← group-level skip: prevents test bodies from running
 }

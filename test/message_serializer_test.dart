@@ -5,6 +5,7 @@ import 'package:phoenix_socket/phoenix_socket.dart';
 
 void main() {
   late MessageSerializer serializer;
+
   final exampleMsg = Message(
     joinRef: '0',
     ref: '1',
@@ -13,12 +14,11 @@ void main() {
     payload: {'foo': 1},
   );
 
-  Uint8List binPayload() {
-    return Uint8List.fromList([1]);
-  }
+  Uint8List binPayload() => Uint8List.fromList([1]);
 
   setUp(() {
-    serializer = const MessageSerializer();
+    // const removed — MessageSerializer is now mutable.
+    serializer = MessageSerializer();
   });
 
   group('MessageSerializer', () {
@@ -51,16 +51,16 @@ void main() {
 
         final encoded = serializer.encode(message);
         final expected = Uint8List.fromList([
-          0, // push type
-          1, // joinRef length
-          1, // ref length
-          1, // topic length
-          1, // event length
-          ...utf8.encode('0'), // joinRef
-          ...utf8.encode('1'), // ref
-          ...utf8.encode('t'), // topic
-          ...utf8.encode('e'), // event
-          1, // payload
+          0,
+          1,
+          1,
+          1,
+          1,
+          ...utf8.encode('0'),
+          ...utf8.encode('1'),
+          ...utf8.encode('t'),
+          ...utf8.encode('e'),
+          1,
         ]);
 
         expect(encoded, equals(expected));
@@ -78,16 +78,16 @@ void main() {
 
         final encoded = serializer.encode(message);
         final expected = Uint8List.fromList([
-          0, // push type
-          2, // joinRef length
-          1, // ref length
-          3, // topic length
-          2, // event length
-          ...utf8.encode('10'), // joinRef
-          ...utf8.encode('1'), // ref
-          ...utf8.encode('top'), // topic
-          ...utf8.encode('ev'), // event
-          1, // payload
+          0,
+          2,
+          1,
+          3,
+          2,
+          ...utf8.encode('10'),
+          ...utf8.encode('1'),
+          ...utf8.encode('top'),
+          ...utf8.encode('ev'),
+          1,
         ]);
 
         expect(encoded, equals(expected));
@@ -95,18 +95,18 @@ void main() {
 
       test('decodes push', () {
         final List<int> message = [
-          0, // push type
-          3, // joinRef length
-          3, // topic length
-          10, // event length
-          ...utf8.encode('123'), // joinRef
-          ...utf8.encode('top'), // topic
-          ...utf8.encode('some-event'), // event
-          1, 1, // payload
+          0,
+          3,
+          3,
+          10,
+          ...utf8.encode('123'),
+          ...utf8.encode('top'),
+          ...utf8.encode('some-event'),
+          1,
+          1,
         ];
 
         final decoded = serializer.decode(Uint8List.fromList(message));
-
         expect(decoded.joinRef, equals('123'));
         expect(decoded.ref, isNull);
         expect(decoded.topic, equals('top'));
@@ -116,20 +116,20 @@ void main() {
 
       test('decodes reply', () {
         final List<int> message = [
-          1, // reply type
-          3, // joinRef length
-          2, // ref length
-          3, // topic length
-          2, // event length
-          ...utf8.encode('100'), // joinRef
-          ...utf8.encode('12'), // ref
-          ...utf8.encode('top'), // topic
-          ...utf8.encode('ok'), // event/status
-          1, 1, // payload
+          1,
+          3,
+          2,
+          3,
+          2,
+          ...utf8.encode('100'),
+          ...utf8.encode('12'),
+          ...utf8.encode('top'),
+          ...utf8.encode('ok'),
+          1,
+          1,
         ];
 
         final decoded = serializer.decode(Uint8List.fromList(message));
-
         expect(decoded.joinRef, equals('100'));
         expect(decoded.ref, equals('12'));
         expect(decoded.topic, equals('top'));
@@ -142,16 +142,16 @@ void main() {
 
       test('decodes broadcast', () {
         final List<int> message = [
-          2, // broadcast type
-          3, // topic length
-          10, // event length
+          2,
+          3,
+          10,
           ...utf8.encode('top'),
           ...utf8.encode('some-event'),
-          1, 1, // payload
+          1,
+          1,
         ];
 
         final decoded = serializer.decode(Uint8List.fromList(message));
-
         expect(decoded.joinRef, isNull);
         expect(decoded.ref, isNull);
         expect(decoded.topic, equals('top'));
@@ -164,10 +164,12 @@ void main() {
       test('throws on invalid message type', () {
         expect(
           () => serializer.decode(123),
+          // Updated to match the new ArgumentError message from
+          // message_serializer.dart: "rawData must be a String or Uint8List, got int"
           throwsA(isA<ArgumentError>().having(
             (e) => e.toString(),
             'message',
-            contains('non-string or a non-list of integers'),
+            contains('String or Uint8List'),
           )),
         );
       });
@@ -183,16 +185,14 @@ void main() {
     group('Edge cases', () {
       test('handles empty binary payload', () {
         final List<int> message = [
-          2, // broadcast type
-          3, // topic length
-          5, // event length
+          2,
+          3,
+          5,
           ...utf8.encode('top'),
           ...utf8.encode('event'),
-          // empty payload
         ];
 
         final decoded = serializer.decode(Uint8List.fromList(message));
-
         expect(decoded.payload, isEmpty);
       });
 
@@ -201,25 +201,24 @@ void main() {
               'nested': {'data': 42},
               'list': [
                 {'item': 1},
-                {'item': 2}
+                {'item': 2},
               ],
             };
 
-        final serializer = MessageSerializer(
-          payloadDecoder: customDecoder,
-        );
+        // payloadDecoder shortcut on PhoenixSocketOptions is gone —
+        // construct MessageSerializer directly instead.
+        final s = MessageSerializer(payloadDecoder: customDecoder);
 
         final List<int> message = [
-          2, // broadcast type
-          3, // topic length
-          5, // event length
+          2,
+          3,
+          5,
           ...utf8.encode('top'),
           ...utf8.encode('event'),
-          1, // payload
+          1,
         ];
 
-        final decoded = serializer.decode(Uint8List.fromList(message));
-
+        final decoded = s.decode(Uint8List.fromList(message));
         expect(decoded.payload?['nested']['data'], equals(42));
         expect(decoded.payload?['list'][0]['item'], equals(1));
         expect(decoded.payload?['list'][1]['item'], equals(2));

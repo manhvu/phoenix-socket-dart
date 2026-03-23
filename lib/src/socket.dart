@@ -8,6 +8,7 @@ import 'package:phoenix_socket/src/utils/iterable_extensions.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:web_socket_channel/status.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:phoenix_socket/src/message_serializer.dart';
 
 import 'channel.dart';
 import 'events.dart';
@@ -62,11 +63,11 @@ class PhoenixSocket {
         _webSocketChannelFactory = webSocketChannelFactory,
         _logger = Logger(loggerName) {
     _options = socketOptions ?? PhoenixSocketOptions();
+    _serializer = _options.resolveSerializer();
 
     _reconnects = _options.reconnectDelays;
 
-    _messageStream =
-        _receiveStreamController.stream.map(_options.serializer.decode);
+    _messageStream = _receiveStreamController.stream.map(_serializer.decode);
 
     _openStream =
         _stateStreamController.stream.whereType<PhoenixSocketOpenEvent>();
@@ -106,6 +107,8 @@ class PhoenixSocket {
   late Stream<PhoenixSocketErrorEvent> _errorStream;
   late Stream<Message> _messageStream;
 
+  late final MessageSerializer _serializer;
+
   SocketState _socketState;
 
   WebSocketChannel? _ws;
@@ -126,6 +129,8 @@ class PhoenixSocket {
 
   /// Stream of all [Message] instances received.
   Stream<Message> get messageStream => _messageStream;
+
+  MessageSerializer get serializer => _serializer;
 
   /// Reconnection durations, increasing in length.
   late List<Duration> _reconnects;
@@ -356,7 +361,7 @@ class PhoenixSocket {
         'does not contain a ref',
       );
     }
-    _addToSink(_options.serializer.encode(message));
+    _addToSink(_serializer.encode(message));
     return (_pendingMessages[message.ref!] = Completer<Message>()).future;
   }
 
