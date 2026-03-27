@@ -32,9 +32,10 @@ class PushResponse {
   /// ```
   factory PushResponse.fromMessage(Message message) {
     final data = message.payload;
+    final response = data?['response'];
     return PushResponse(
-      status: data?['status'] as String?,
-      response: data?['response'],
+      status: response?['status'] as String?,
+      response: response['response'],
     );
   }
 

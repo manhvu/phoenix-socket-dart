@@ -91,6 +91,5 @@ class SerializerRegistry {
   bool has(String name) => _factories.containsKey(name);
 
   /// The names of all currently registered codecs.
-  Set<String> get registeredNames =>
-      Set<String>.unmodifiable(_factories.keys);
+  Set<String> get registeredNames => Set<String>.unmodifiable(_factories.keys);
 }
