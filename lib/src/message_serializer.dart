@@ -22,12 +22,10 @@ typedef PayloadDecoderCallback = dynamic Function(Uint8List payload);
 class MessageSerializer {
   MessageSerializer({
     this.name = 'json',
-    DecoderCallback decoder = jsonDecode,
-    EncoderCallback encoder = jsonEncode,
-    PayloadDecoderCallback? payloadDecoder,
-  })  : _decoder = decoder,
-        _encoder = encoder,
-        _payloadDecoder = payloadDecoder;
+    this.decoder = jsonDecode,
+    this.encoder = jsonEncode,
+    this.payloadDecoder,
+  });
 
   /// The codec name this serializer was created from.
   ///
@@ -35,20 +33,9 @@ class MessageSerializer {
   /// on encoding or decoding behaviour.
   final String name;
 
-  DecoderCallback _decoder;
-  EncoderCallback _encoder;
-  PayloadDecoderCallback? _payloadDecoder;
-
-  // ── Getters / setters ─────────────────────────────────────────────────────
-
-  DecoderCallback get decoder => _decoder;
-  set decoder(DecoderCallback v) => _decoder = v;
-
-  EncoderCallback get encoder => _encoder;
-  set encoder(EncoderCallback v) => _encoder = v;
-
-  PayloadDecoderCallback? get payloadDecoder => _payloadDecoder;
-  set payloadDecoder(PayloadDecoderCallback? v) => _payloadDecoder = v;
+  DecoderCallback decoder;
+  EncoderCallback encoder;
+  PayloadDecoderCallback? payloadDecoder;
 
   // ── Atomic update ─────────────────────────────────────────────────────────
 
@@ -62,12 +49,12 @@ class MessageSerializer {
     PayloadDecoderCallback? payloadDecoder,
     bool clearPayloadDecoder = false,
   }) {
-    if (decoder != null) _decoder = decoder;
-    if (encoder != null) _encoder = encoder;
+    if (decoder != null) this.decoder = decoder;
+    if (encoder != null) this.encoder = encoder;
     if (clearPayloadDecoder) {
-      _payloadDecoder = null;
+      this.payloadDecoder = null;
     } else if (payloadDecoder != null) {
-      _payloadDecoder = payloadDecoder;
+      this.payloadDecoder = payloadDecoder;
     }
   }
 
@@ -85,10 +72,11 @@ class MessageSerializer {
   }) =>
       MessageSerializer(
         name: name ?? this.name,
-        decoder: decoder ?? _decoder,
-        encoder: encoder ?? _encoder,
-        payloadDecoder:
-            clearPayloadDecoder ? null : (payloadDecoder ?? _payloadDecoder),
+        decoder: decoder ?? this.decoder,
+        encoder: encoder ?? this.encoder,
+        payloadDecoder: clearPayloadDecoder
+            ? null
+            : (payloadDecoder ?? this.payloadDecoder),
       );
 
   // ── Encode / decode ───────────────────────────────────────────────────────
@@ -101,7 +89,7 @@ class MessageSerializer {
     if (message.payload is Uint8List) {
       return BinaryDecoder.binaryEncode(message);
     }
-    return _encoder(message.encode());
+    return encoder(message.encode());
   }
 
   /// Decodes a raw WebSocket frame into a [Message].
@@ -110,7 +98,7 @@ class MessageSerializer {
   /// (binary path). Any other type throws [ArgumentError].
   Message decode(dynamic rawData) {
     if (rawData is String) {
-      return Message.fromJson(_decoder(rawData) as List<dynamic>);
+      return Message.fromJson(decoder(rawData) as List<dynamic>);
     }
 
     if (rawData is Uint8List) {
@@ -135,8 +123,8 @@ class MessageSerializer {
   // ── Private ───────────────────────────────────────────────────────────────
 
   dynamic _decodePayload(dynamic payload) {
-    if (_payloadDecoder == null || payload is! Uint8List) return payload;
-    final decoded = _payloadDecoder!(payload);
+    if (payloadDecoder == null || payload is! Uint8List) return payload;
+    final decoded = payloadDecoder!(payload);
     if (decoded is Map) return MapUtils.deepConvertToStringDynamic(decoded);
     if (decoded is Uint8List) return decoded;
     return <String, dynamic>{'data': decoded};
