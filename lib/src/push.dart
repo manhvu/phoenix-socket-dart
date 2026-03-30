@@ -30,13 +30,22 @@ class PushResponse {
   ///   }
   /// }
   /// ```
+  /// some lib decode in wrong way, payload: {response: {status: ok}}
+  /// TO-DO: need to update lib
   factory PushResponse.fromMessage(Message message) {
     final data = message.payload;
-    final response = data?['response'];
-    return PushResponse(
-      status: response?['status'] as String?,
-      response: response['response'],
-    );
+    if (data?['status'] != null) {
+      return PushResponse(
+        status: data?['status'] as String?,
+        response: data?['response'],
+      );
+    } else {
+      final response = data?['response'];
+      return PushResponse(
+        status: response?['status'],
+        response: {},
+      );
+    }
   }
 
   /// Status provided by the backend.
