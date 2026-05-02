@@ -257,23 +257,33 @@ class Push {
       _responseCompleter.complete(response);
     }
 
+    // Get receivers for this status and trigger them directly
+    final status = response.status;
+    final receivers = _receivers[status];
+
     _logger.finer(() {
-      if (_receivers[response.status] case final receiver?
-          when receiver.isNotEmpty) {
-        return 'Triggering ${receiver.length} callbacks';
+      if (receivers != null && receivers.isNotEmpty) {
+        return 'Triggering ${receivers.length} callbacks';
       }
       return 'Not triggering any callbacks';
     });
 
-    final receivers = _receivers[response.status]?.toList() ?? const [];
-    clearReceivers();
-    for (final cb in receivers) {
-      cb(response);
+    if (receivers != null && receivers.isNotEmpty) {
+      // Trigger callbacks directly without creating a copy
+      // since we're about to clear the receivers anyway
+      for (final cb in receivers) {
+        cb(response);
+      }
+      // Clear only the receivers for this status, not all receivers
+      _receivers.remove(status);
     }
   }
 
   /// Dispose the set of waiters associated with this push.
   void clearReceivers() => _receivers.clear();
+
+  /// Remove receivers for a specific status.
+  void _clearReceiversForStatus(String status) => _receivers.remove(status);
 
   // Remove existing waiters and reset completer
   void cleanUp() {

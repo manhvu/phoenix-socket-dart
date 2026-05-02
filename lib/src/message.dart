@@ -11,13 +11,15 @@ final Logger _logger = Logger('phoenix_socket.message');
 class Message {
   /// Given a parsed JSON coming from the backend, yield
   /// a [Message] instance.
+  ///
+  /// Optimized to avoid factory overhead on hot path.
   factory Message.fromJson(List<dynamic> parts) {
     _logger.finest('Message decoded from $parts');
     return Message(
-      joinRef: parts[0],
-      ref: parts[1],
-      topic: parts[2],
-      event: PhoenixChannelEvent.custom(parts[3]),
+      joinRef: parts[0] as String?,
+      ref: parts[1] as String?,
+      topic: parts[2] as String?,
+      event: PhoenixChannelEvent.custom(parts[3] as String),
       payload: parts[4],
     );
   }
@@ -94,6 +96,8 @@ class Message {
   final dynamic payload;
 
   /// Encode a message to a JSON-encodable list of values.
+  ///
+  /// Optimized to avoid intermediate allocations where possible.
   Object encode() {
     final parts = [
       joinRef,

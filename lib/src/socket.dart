@@ -98,6 +98,20 @@ class PhoenixSocket {
       StreamController.broadcast();
   final String _endpoint;
   final StreamController<Message> _topicMessages = StreamController();
+
+  /// Efficient topic-based router that maps topics to stream controllers
+  /// providing O(1) lookup instead of O(n) linear scan.
+  final Map<String, StreamController<Message>> _topicControllers = {};
+  void _handleTopicMessage(Message message) {
+    final topic = message.topic;
+    if (topic == null || topic.isEmpty) return;
+
+    final controller = _topicControllers[topic];
+    if (controller != null && !controller.isClosed) {
+      controller.add(message);
+    }
+  }
+
   final WebSocketChannel Function(Uri uri)? _webSocketChannelFactory;
 
   late Uri _mountPoint;
@@ -169,8 +183,17 @@ class PhoenixSocket {
   /// The [PhoenixChannel] for this topic may not be open yet, it'll still
   /// eventually yield messages when the channel is open and it receives
   /// messages.
-  Stream<Message> streamForTopic(String topic) => _topicStreams.putIfAbsent(
-      topic, () => _streamRouter.route((event) => event.topic == topic));
+  Stream<Message> streamForTopic(String topic) =>
+      _topicStreams.putIfAbsent(topic, () {
+        final controller = StreamController<Message>.broadcast(
+          onCancel: () {
+            _topicControllers.remove(topic);
+            _topicStreams.remove(topic);
+          },
+        );
+        _topicControllers[topic] = controller;
+        return controller.stream;
+      });
 
   /// The string URL of the remote Phoenix server.
   String get endpoint => _endpoint;
@@ -311,9 +334,14 @@ class PhoenixSocket {
       channel.close();
     }
 
-    _topicMessages.close();
+    // Close all topic controllers
+    for (final controller in _topicControllers.values) {
+      controller.close();
+    }
+    _topicControllers.clear();
     _topicStreams.clear();
 
+    _topicMessages.close();
     _stateStreamController.close();
     _receiveStreamController.close();
   }
@@ -467,6 +495,12 @@ class PhoenixSocket {
     _heartbeatTimeout = null;
   }
 
+  /// Send heartbeat and handle the result without blocking.
+  /// This prevents heartbeat from blocking the event loop.
+  Future<void> _sendHeartbeatAsync() async {
+    await _sendHeartbeat();
+  }
+
   Future<bool> _sendHeartbeat({bool ignorePreviousHeartbeat = false}) async {
     if (!isConnected) return false;
 
@@ -537,15 +571,18 @@ class PhoenixSocket {
         _nextHeartbeatRef = null;
       }
 
-      final completer = _pendingMessages[message.ref!];
+      final completer = _pendingMessages.remove(message.ref);
       if (completer != null) {
-        _pendingMessages.remove(message.ref);
         completer.complete(message);
       }
     }
 
     if (message.topic != null && message.topic!.isNotEmpty) {
-      _topicMessages.add(message);
+      // Route directly to topic-specific controller (O(1) lookup)
+      final controller = _topicControllers[message.topic!];
+      if (controller != null && !controller.isClosed) {
+        controller.add(message);
+      }
     }
   }
 

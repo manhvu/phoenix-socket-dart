@@ -96,9 +96,20 @@ class MessageSerializer {
   ///
   /// [rawData] must be a [String] (JSON / text path) or a [Uint8List]
   /// (binary path). Any other type throws [ArgumentError].
+  ///
+  /// This method is optimized for the common case (String messages)
+  /// to minimize overhead on the hot path.
   Message decode(dynamic rawData) {
     if (rawData is String) {
-      return Message.fromJson(decoder(rawData) as List<dynamic>);
+      // Fast path: decode JSON string to Message
+      final List<dynamic> parts = decoder(rawData) as List<dynamic>;
+      return Message(
+        joinRef: parts[0] as String?,
+        ref: parts[1] as String?,
+        topic: parts[2] as String?,
+        event: PhoenixChannelEvent.custom(parts[3] as String),
+        payload: parts[4],
+      );
     }
 
     if (rawData is Uint8List) {
